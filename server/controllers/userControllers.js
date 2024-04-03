@@ -1,4 +1,8 @@
 const user = require('../models/userModel')
+const jwt = require("jsonwebtoken")
+const fs = require('fs')
+const path = require('path')
+const {v4: uuid} = require("uuid")
 const HttpError = require("../models/errorModel");
 const bcrypt = require('bcryptjs');
 
@@ -42,21 +46,103 @@ const registerUser = async (req, res, next) => {
 // POST : api/users/login
 // UNPROTECTED
 const LoginUser = async (req, res, next) => {
-    res.json("Login User")
+    try {
+        const {email, password} = req.body;
+
+        if (!email || !password) {
+            return next(new HttpError("Fill in all fields.", 422))
+        }
+
+        const newEmail = email.toLowerCase()
+
+        const foundUser = await user.findOne({email: newEmail})
+
+        if(!foundUser) {
+            return next(new HttpError("Invalid credentials.", 422))
+        }
+
+        const comparePass = await bcrypt.compare(password, foundUser.password)
+
+        if(!comparePass) {
+            return next(new HttpError("Invalid credentials.", 422))
+        }
+
+        const {_id: id, name} = foundUser;
+        const token = jwt.sign({id, name}, process.env.JWT_SECRET, {expiresIn: "1d"});
+
+        res.status(200).json({token, id, name});         
+
+    } catch (error) {
+        return next(new HttpError("Login failed. Please check your credentials.", 422))
+    }
 }
 
 // ======================================= USER PROFILE 
 // POST : api/users/:id 
 //  PROTECTED
 const getUser = async (req, res, next) => {
-    res.json("User Profile")
+    try {
+        const {id} = req.params;
+        const founduser = await user.findById(id).select('-password')
+
+        if(!founduser) {
+            return next(new HttpError("User not found", 422))
+        }
+
+        res.status(200).json(founduser);
+    } catch (error) {
+        return next(new HttpError(error))
+    }
 }
 
 // ======================================= CHANGE USER AVATAR (profile picture)
 // POST : api/users/change-avatar
 //  PROTECTED
 const changeAvatar = async (req, res, next) => {
-    res.json("Change User Profile")
+    try {
+        if(!req.files.avatar) {
+            return next(new HttpError("Please choose an Image.", 422))
+        }
+
+        // find user from database
+        const finduser = await user.findById(req.user.id)
+
+        // delete old avatar if exist 
+        if(finduser.avatar) {
+            fs.unlink(path.join(__dirname, '..', 'uploads', finduser.avatar), (err) => {
+                if(err) {
+                    return next(new HttpError(err))
+                }
+            })
+        }
+
+        const {avatar} = req.files;
+        // check file size
+        if(avatar.size > 500000) {
+            return next(new HttpError("profile picture to big. should be less than 500kb"), 422)
+        }
+
+        let fileName;
+        fileName = avatar.name;
+        let splittedfilename = fileName.split('.')
+        let newfilename = splittedfilename[0] + uuid() + '.' + splittedfilename[splittedfilename.length - 1]
+
+        avatar.mv(path.join(__dirname, '..', 'uploads', newfilename), async (err) => {
+            if (err) {
+                return next(new HttpError(err))
+            }
+
+            const updateAvatar = await user.findByIdAndUpdate(req.user.id, {avatar: newfilename}, {new: true})
+
+            if (!updateAvatar) {
+                return next(new HttpError("Avatar couldn't be changed.", 422));
+            }
+
+            res.status(200).json(updateAvatar)
+        })
+    } catch (error) {
+        return next(new HttpError(error));
+    }
 }   
 
 // ======================================= EDIT USER DETAILS (from profile)
@@ -70,7 +156,12 @@ const editUser = async (req, res, next) => {
 // POST : api/users/authors
 // UNPROTECTED
 const getAuthors = async (req, res, next) => {
-    res.json("Get all users/authors")
+    try {
+        const authors = await  user.find().select('-password')
+        res.json(authors)
+    } catch (error) {
+        return next(new HttpError(error))
+    }
 } 
 
 module.exports = {registerUser, LoginUser, getUser, changeAvatar, editUser, getAuthors}
