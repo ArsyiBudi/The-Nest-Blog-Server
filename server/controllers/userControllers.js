@@ -98,6 +98,7 @@ const getUser = async (req, res, next) => {
 // ======================================= CHANGE USER AVATAR (profile picture)
 // POST : api/users/change-avatar
 //  PROTECTED
+
 const changeAvatar = async (req, res, next) => {
     try {
         if(!req.files.avatar) {
